@@ -14,70 +14,34 @@ const state = {
   slides:[], exporting:false, editingIndex:null,
 };
 
-// ─── Algoritmo de división de texto ──────────────────────────────────────────
-function parseTextToSlides(text, maxSlides) {
-  const lines = text.split('\n').map(function(l){ return l.trim(); });
-  const blocks = [];
-  let current = [];
+// ─── Algoritmo de división de texto (por línea en blanco) ───────────────────
+function parseTextToSlides(text) {
+  // Dividir por líneas en blanco — cada bloque = una diapositiva
+  const blocks = text.split(/\n\s*\n/).map(function(b){ return b.trim(); }).filter(function(b){ return b.length > 0; });
 
-  lines.forEach(function(line) {
-    if (line === '') {
-      if (current.length > 0) { blocks.push(current); current = []; }
-    } else {
-      current.push(line);
-    }
-  });
-  if (current.length > 0) blocks.push(current);
+  return blocks.map(function(block) {
+    const lines = block.split('\n').map(function(l){ return l.trim(); }).filter(function(l){ return l.length > 0; });
+    if (lines.length === 0) return null;
 
-  if (blocks.length === 0) return [];
+    // Primera línea = título
+    let title = lines[0].replace(/^#+\s*/, '').trim();
+    if (title.length > 80) title = title.slice(0, 77) + '...';
 
-  // Convertir bloques en slides
-  const rawSlides = blocks.map(function(block) {
-    const firstLine = block[0];
-    const rest = block.slice(1);
-    const isTitle = firstLine.length < 80 && (
-      firstLine === firstLine.toUpperCase() ||
-      /^#+\s/.test(firstLine) ||
-      /^[A-ZÁÉÍÓÚÑ]/.test(firstLine) && firstLine.length < 60
-    );
-
-    let title = isTitle ? firstLine.replace(/^#+\s*/, '') : firstLine.slice(0, 70);
+    // Segunda línea corta sin bullet = subtítulo
     let subtitle = '';
-    let contentLines = isTitle ? rest : [];
-
-    if (!isTitle) {
-      const words = firstLine.split(' ');
-      title = words.slice(0, 8).join(' ');
-      if (words.length > 8) contentLines.unshift(words.slice(8).join(' '));
+    let contentStart = 1;
+    if (lines.length > 1 && lines[1].length < 70 && !lines[1].startsWith('•') && !lines[1].startsWith('-') && !lines[1].startsWith('*')) {
+      subtitle = lines[1];
+      contentStart = 2;
     }
 
-    // Detectar subtítulo (segunda línea corta)
-    if (contentLines.length > 0 && contentLines[0].length < 60 && !contentLines[0].startsWith('•') && !contentLines[0].startsWith('-')) {
-      subtitle = contentLines[0];
-      contentLines = contentLines.slice(1);
-    }
-
-    // Convertir líneas en bullets
-    const bullets = contentLines.slice(0, 4).map(function(l) {
-      const clean = l.replace(/^[-•*]\s*/, '').trim();
-      const words = clean.split(' ').slice(0, 14).join(' ');
-      return '• ' + words;
+    // Resto = bullets (máx 6)
+    const bulletLines = lines.slice(contentStart, contentStart + 6).map(function(l) {
+      return '• ' + l.replace(/^[-•*]\s*/, '').trim();
     });
 
-    return { title: title, subtitle: subtitle, content: bullets.join('\n') };
-  });
-
-  // Ajustar al número deseado de slides
-  if (rawSlides.length <= maxSlides) return rawSlides;
-
-  // Reducir combinando slides pequeños
-  const step = rawSlides.length / maxSlides;
-  const result = [];
-  for (let i = 0; i < maxSlides; i++) {
-    const idx = Math.floor(i * step);
-    result.push(rawSlides[idx]);
-  }
-  return result;
+    return { title: title, subtitle: subtitle, content: bulletLines.join('\n') };
+  }).filter(function(s){ return s !== null; });
 }
 
 // ─── Canvas helpers ───────────────────────────────────────────────────────────
@@ -454,8 +418,8 @@ function generateSlides() {
   const text = document.getElementById('content-textarea').value.trim();
   if (!text) { showError('Escribe o pega tu contenido primero.'); return; }
   if (!state.selectedTemplate) { showError('Selecciona una plantilla primero.'); return; }
-  const maxSlides = parseInt(document.getElementById('slides-count').value);
-  const slides = parseTextToSlides(text, maxSlides);
+  
+  const slides = parseTextToSlides(text);
   if (slides.length === 0) { showError('No se pudo procesar el texto. Asegúrate de tener párrafos separados por líneas en blanco.'); return; }
   state.slides = slides;
   hideError();
@@ -653,10 +617,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const words = val.trim().split(/\s+/).filter(Boolean).length;
     document.getElementById('text-stats').textContent = val.length + ' chars · ' + words + ' palabras';
   });
-  const slider = document.getElementById('slides-count');
-  slider.addEventListener('input', function() {
-    document.getElementById('slides-count-val').textContent = slider.value;
-  });
 
   // Step 2
   document.getElementById('btn-back-template').addEventListener('click', function(){ goToStep(0); });
@@ -679,8 +639,6 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('upload-area').classList.remove('hidden');
     document.getElementById('bg-combo-preview').classList.add('hidden');
     document.getElementById('template-confirm').classList.add('hidden');
-    document.getElementById('slides-count').value = 5;
-    document.getElementById('slides-count-val').textContent = '5';
     renderTemplatesGrid();
     goToStep(0);
   });
