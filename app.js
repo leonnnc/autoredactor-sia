@@ -14,105 +14,124 @@ const state = {
   slides:[], exporting:false, editingIndex:null,
 };
 
-// ─── Detección y parsing de texto ────────────────────────────────────────────
+// ─── Parser inteligente de texto ─────────────────────────────────────────────
 
-// Detecta si el texto es un pasaje bíblico
-// Patrones: "Juan 3:16", "Génesis 1:1-10", "1 Corintios 13", líneas que empiezan con número+espacio
+var BIBLE_BOOKS = /^(G[eé]nesis|[EÉ]xodo|Lev[ií]tico|N[uú]meros|Deuteronomio|Josu[eé]|Jueces|Rut|[12]\s*Samuel|[12]\s*Reyes|[12]\s*Cr[oó]nicas|Esdras|Nehemías|Ester|Job|Salmos?|Proverbios|Eclesiastés|Cantares|Isa[ií]as?|Jerem[ií]as?|Lamentaciones|Ezequiel|Daniel|Oseas|Joel|Am[oó]s|Abd[ií]as|Jon[aá]s|Miqueas|Nah[uú]m|Habacuc|Sofonías|Hageo|Zacarías|Malaqu[ií]as|Mateo|Marcos|Lucas|Juan|Hechos|Romanos|[12]\s*Corintios|G[aá]latas|Efesios|Filipenses|Colosenses|[12]\s*Tesalonicenses|[12]\s*Timoteo|Tito|Filem[oó]n|Hebreos|Santiago|[12]\s*Pedro|[12]\s*Juan|[23]\s*Juan|Judas|Apocalipsis)/i;
+
+// Detecta si el texto contiene versículos bíblicos
 function isBibleText(text) {
-  const bibleBookPattern = /^(G[eé]nesis|[EÉ]xodo|Levítico|N[uú]meros|Deuteronomio|Josu[eé]|Jueces|Rut|[12]\s*Samuel|[12]\s*Reyes|[12]\s*Cr[oó]nicas|Esdras|Nehe|Ester|Job|Salmos?|Proverbios|Eclesiastés|Cantares|Isa[ií]as?|Jerem|Lament|Ezequiel|Daniel|Oseas|Joel|Am[oó]s|Abd|Jon[aá]s|Miqueas|Nah[uú]m|Habacuc|Sofonías|Hageo|Zacarías|Malaqu|Mateo|Marcos|Lucas|Juan|Hechos|Romanos|[12]\s*Corintios|G[aá]latas|Efesios|Filipenses|Colosenses|[12]\s*Tesalonicenses|[12]\s*Timoteo|Tito|Filem[oó]n|Hebreos|Santiago|[12]\s*Pedro|[12]\s*Juan|[23]\s*Juan|Judas|Apocalipsis)/i;
-  const lines = text.trim().split('\n').map(function(l){ return l.trim(); }).filter(function(l){ return l; });
-  if (lines.length === 0) return false;
-  // Primera línea es nombre de libro
-  if (bibleBookPattern.test(lines[0])) return true;
-  // Varias líneas empiezan con número seguido de texto
-  const verseLines = lines.filter(function(l){ return /^\d+\s+\S/.test(l); });
-  return verseLines.length >= 2;
+  var lines = text.trim().split('\n').map(function(l){ return l.trim(); }).filter(Boolean);
+  if (!lines.length) return false;
+  // Primera línea es nombre de libro bíblico
+  if (BIBLE_BOOKS.test(lines[0])) return true;
+  // Al menos 3 líneas que empiezan con número seguido de espacio y texto
+  var verseCount = lines.filter(function(l){ return /^\d{1,3}\s+\S/.test(l); }).length;
+  return verseCount >= 3;
 }
 
-// Parsea texto bíblico: libro como título, cada versículo = una slide
+// Parser bíblico: maneja TODOS los formatos posibles
+// Formato 1: cada versículo en su propia línea "16 Porque de tal manera..."
+// Formato 2: versículos pegados en un párrafo "16 Porque... 17 Porque no..."
+// Formato 3: con saltos de línea entre versículos
 function parseBibleText(text) {
-  const lines = text.trim().split('\n').map(function(l){ return l.trim(); }).filter(function(l){ return l; });
-  if (lines.length === 0) return [];
+  var lines = text.trim().split('\n').map(function(l){ return l.trim(); }).filter(Boolean);
+  if (!lines.length) return [];
 
-  const slides = [];
-  let bookTitle = '';
-  let reference = '';
+  var slides = [];
+  var bookTitle = '';
+  var startLine = 0;
 
   // Detectar primera línea como referencia del libro
-  const firstLine = lines[0];
-  const bookRefPattern = /^(.+?\d+)\s*[:\-]?\s*(\d+.*)?$/;
-  const isBookRef = /^(G[eé]nesis|[EÉ]xodo|Levítico|N[uú]meros|Deuteronomio|Josu[eé]|Jueces|Rut|[12]\s*Samuel|[12]\s*Reyes|[12]\s*Cr[oó]nicas|Esdras|Nehe|Ester|Job|Salmos?|Proverbios|Eclesiastés|Cantares|Isa[ií]as?|Jerem|Lament|Ezequiel|Daniel|Oseas|Joel|Am[oó]s|Abd|Jon[aá]s|Miqueas|Nah[uú]m|Habacuc|Sofonías|Hageo|Zacarías|Malaqu|Mateo|Marcos|Lucas|Juan|Hechos|Romanos|[12]\s*Corintios|G[aá]latas|Efesios|Filipenses|Colosenses|[12]\s*Tesalonicenses|[12]\s*Timoteo|Tito|Filem[oó]n|Hebreos|Santiago|[12]\s*Pedro|[12]\s*Juan|[23]\s*Juan|Judas|Apocalipsis)/i.test(firstLine);
-
-  let verseLines = lines;
-  if (isBookRef) {
-    bookTitle = firstLine;
-    verseLines = lines.slice(1);
-    // Slide de portada con el nombre del libro
-    slides.push({ title: bookTitle, subtitle: '', content: '', isTitle: true });
+  if (BIBLE_BOOKS.test(lines[0])) {
+    bookTitle = lines[0];
+    startLine = 1;
+    // Slide de portada
+    slides.push({ title: bookTitle, subtitle: 'Palabra de Dios', content: '', isTitle: true });
   }
 
-  // Parsear versículos: líneas que empiezan con número
-  // Pueden venir como "1 En el principio..." o pegados sin salto
-  // Primero unir todo el texto de versículos y re-separar
-  const fullVerseText = verseLines.join(' ');
-  // Separar por número al inicio: "1 texto 2 texto 3 texto"
-  const verseParts = fullVerseText.split(/(?=\b\d{1,3}\s+[A-ZÁÉÍÓÚÑ])/);
+  // Unir todas las líneas de versículos en un solo texto
+  var verseText = lines.slice(startLine).join(' ');
 
-  verseParts.forEach(function(part) {
+  // Separar por número de versículo: busca patrón "número espacio texto"
+  // El regex captura CUALQUIER carácter después del número, no solo mayúsculas
+  var parts = verseText.split(/(?=\b(\d{1,3})\s+(?!\d))/);
+
+  // Reconstruir versículos correctamente
+  var verses = [];
+  var current = '';
+  parts.forEach(function(part) {
     part = part.trim();
     if (!part) return;
-    const match = part.match(/^(\d+)\s+([\s\S]+)$/);
+    if (/^\d{1,3}\s+\S/.test(part)) {
+      if (current.trim()) verses.push(current.trim());
+      current = part;
+    } else {
+      current += ' ' + part;
+    }
+  });
+  if (current.trim()) verses.push(current.trim());
+
+  // Si no se detectaron versículos numerados, tratar cada línea como versículo
+  if (verses.length === 0) {
+    verses = lines.slice(startLine).filter(function(l){ return l.trim(); });
+  }
+
+  verses.forEach(function(verse) {
+    verse = verse.trim();
+    if (!verse) return;
+    var match = verse.match(/^(\d{1,3})\s+([\s\S]+)$/);
     if (match) {
-      const verseNum = match[1];
-      const verseText = match[2].trim();
+      var num = match[1];
+      var verseContent = match[2].trim();
+      var bookShort = bookTitle ? bookTitle.replace(/\s+\d.*$/, '') : '';
       slides.push({
-        title: verseText,
-        subtitle: (bookTitle ? bookTitle.split(' ')[0] + ' ' : '') + verseNum,
+        title: verseContent,
+        subtitle: bookShort ? bookShort + ' ' + num : 'Versículo ' + num,
         content: '',
         isVerse: true,
       });
-    } else if (part.length > 0) {
-      // Texto sin número de versículo
-      slides.push({ title: part, subtitle: '', content: '' });
+    } else {
+      slides.push({ title: verse, subtitle: bookTitle || '', content: '' });
     }
   });
 
-  return slides.filter(function(s){ return s.title && s.title.trim(); });
+  return slides.filter(function(s){ return s && s.title && s.title.trim(); });
 }
 
-// Parsea texto plano: cada bloque separado por línea en blanco = una slide
+// Parser texto plano: cada bloque separado por línea en blanco = una slide
+// Sin límite de slides
 function parsePlainText(text) {
-  const blocks = text.split(/\n\s*\n/).map(function(b){ return b.trim(); }).filter(function(b){ return b.length > 0; });
+  var blocks = text.split(/\n[ \t]*\n/).map(function(b){ return b.trim(); }).filter(function(b){ return b.length > 0; });
 
   return blocks.map(function(block) {
-    const lines = block.split('\n').map(function(l){ return l.trim(); }).filter(function(l){ return l.length > 0; });
-    if (lines.length === 0) return null;
+    var lines = block.split('\n').map(function(l){ return l.trim(); }).filter(function(l){ return l.length > 0; });
+    if (!lines.length) return null;
 
-    let title = lines[0].replace(/^#+\s*/, '').trim();
-    if (title.length > 90) title = title.slice(0, 87) + '...';
+    var title = lines[0].replace(/^#+\s*/, '').trim();
+    if (title.length > 100) title = title.slice(0, 97) + '...';
 
-    let subtitle = '';
-    let contentStart = 1;
-    if (lines.length > 1 && lines[1].length < 70 && !lines[1].startsWith('•') && !lines[1].startsWith('-')) {
+    var subtitle = '';
+    var contentStart = 1;
+    // Segunda línea corta sin bullet = subtítulo
+    if (lines.length > 1 && lines[1].length < 80 && !/^[-•*\d]/.test(lines[1])) {
       subtitle = lines[1];
       contentStart = 2;
     }
 
-    const bulletLines = lines.slice(contentStart, contentStart + 6).map(function(l) {
-      return '• ' + l.replace(/^[-•*]\s*/, '').trim();
+    // Resto como bullets, sin límite artificial
+    var bulletLines = lines.slice(contentStart).map(function(l) {
+      var clean = l.replace(/^[-•*]\s*/, '').trim();
+      return '• ' + clean;
     });
 
     return { title: title, subtitle: subtitle, content: bulletLines.join('\n') };
-  }).filter(function(s){ return s !== null; });
+  }).filter(Boolean);
 }
 
-// Función principal
+// Función principal — sin límites
 function parseTextToSlides(text) {
   if (!text.trim()) return [];
-  if (isBibleText(text)) {
-    return parseBibleText(text);
-  }
-  return parsePlainText(text);
+  return isBibleText(text) ? parseBibleText(text) : parsePlainText(text);
 }
 
 // ─── Canvas helpers ───────────────────────────────────────────────────────────
