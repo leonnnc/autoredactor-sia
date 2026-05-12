@@ -14,34 +14,105 @@ const state = {
   slides:[], exporting:false, editingIndex:null,
 };
 
-// ─── Algoritmo de división de texto (por línea en blanco) ───────────────────
-function parseTextToSlides(text) {
-  // Dividir por líneas en blanco — cada bloque = una diapositiva
+// ─── Detección y parsing de texto ────────────────────────────────────────────
+
+// Detecta si el texto es un pasaje bíblico
+// Patrones: "Juan 3:16", "Génesis 1:1-10", "1 Corintios 13", líneas que empiezan con número+espacio
+function isBibleText(text) {
+  const bibleBookPattern = /^(G[eé]nesis|[EÉ]xodo|Levítico|N[uú]meros|Deuteronomio|Josu[eé]|Jueces|Rut|[12]\s*Samuel|[12]\s*Reyes|[12]\s*Cr[oó]nicas|Esdras|Nehe|Ester|Job|Salmos?|Proverbios|Eclesiastés|Cantares|Isa[ií]as?|Jerem|Lament|Ezequiel|Daniel|Oseas|Joel|Am[oó]s|Abd|Jon[aá]s|Miqueas|Nah[uú]m|Habacuc|Sofonías|Hageo|Zacarías|Malaqu|Mateo|Marcos|Lucas|Juan|Hechos|Romanos|[12]\s*Corintios|G[aá]latas|Efesios|Filipenses|Colosenses|[12]\s*Tesalonicenses|[12]\s*Timoteo|Tito|Filem[oó]n|Hebreos|Santiago|[12]\s*Pedro|[12]\s*Juan|[23]\s*Juan|Judas|Apocalipsis)/i;
+  const lines = text.trim().split('\n').map(function(l){ return l.trim(); }).filter(function(l){ return l; });
+  if (lines.length === 0) return false;
+  // Primera línea es nombre de libro
+  if (bibleBookPattern.test(lines[0])) return true;
+  // Varias líneas empiezan con número seguido de texto
+  const verseLines = lines.filter(function(l){ return /^\d+\s+\S/.test(l); });
+  return verseLines.length >= 2;
+}
+
+// Parsea texto bíblico: libro como título, cada versículo = una slide
+function parseBibleText(text) {
+  const lines = text.trim().split('\n').map(function(l){ return l.trim(); }).filter(function(l){ return l; });
+  if (lines.length === 0) return [];
+
+  const slides = [];
+  let bookTitle = '';
+  let reference = '';
+
+  // Detectar primera línea como referencia del libro
+  const firstLine = lines[0];
+  const bookRefPattern = /^(.+?\d+)\s*[:\-]?\s*(\d+.*)?$/;
+  const isBookRef = /^(G[eé]nesis|[EÉ]xodo|Levítico|N[uú]meros|Deuteronomio|Josu[eé]|Jueces|Rut|[12]\s*Samuel|[12]\s*Reyes|[12]\s*Cr[oó]nicas|Esdras|Nehe|Ester|Job|Salmos?|Proverbios|Eclesiastés|Cantares|Isa[ií]as?|Jerem|Lament|Ezequiel|Daniel|Oseas|Joel|Am[oó]s|Abd|Jon[aá]s|Miqueas|Nah[uú]m|Habacuc|Sofonías|Hageo|Zacarías|Malaqu|Mateo|Marcos|Lucas|Juan|Hechos|Romanos|[12]\s*Corintios|G[aá]latas|Efesios|Filipenses|Colosenses|[12]\s*Tesalonicenses|[12]\s*Timoteo|Tito|Filem[oó]n|Hebreos|Santiago|[12]\s*Pedro|[12]\s*Juan|[23]\s*Juan|Judas|Apocalipsis)/i.test(firstLine);
+
+  let verseLines = lines;
+  if (isBookRef) {
+    bookTitle = firstLine;
+    verseLines = lines.slice(1);
+    // Slide de portada con el nombre del libro
+    slides.push({ title: bookTitle, subtitle: '', content: '', isTitle: true });
+  }
+
+  // Parsear versículos: líneas que empiezan con número
+  // Pueden venir como "1 En el principio..." o pegados sin salto
+  // Primero unir todo el texto de versículos y re-separar
+  const fullVerseText = verseLines.join(' ');
+  // Separar por número al inicio: "1 texto 2 texto 3 texto"
+  const verseParts = fullVerseText.split(/(?=\b\d{1,3}\s+[A-ZÁÉÍÓÚÑ])/);
+
+  verseParts.forEach(function(part) {
+    part = part.trim();
+    if (!part) return;
+    const match = part.match(/^(\d+)\s+([\s\S]+)$/);
+    if (match) {
+      const verseNum = match[1];
+      const verseText = match[2].trim();
+      slides.push({
+        title: verseText,
+        subtitle: (bookTitle ? bookTitle.split(' ')[0] + ' ' : '') + verseNum,
+        content: '',
+        isVerse: true,
+      });
+    } else if (part.length > 0) {
+      // Texto sin número de versículo
+      slides.push({ title: part, subtitle: '', content: '' });
+    }
+  });
+
+  return slides.filter(function(s){ return s.title && s.title.trim(); });
+}
+
+// Parsea texto plano: cada bloque separado por línea en blanco = una slide
+function parsePlainText(text) {
   const blocks = text.split(/\n\s*\n/).map(function(b){ return b.trim(); }).filter(function(b){ return b.length > 0; });
 
   return blocks.map(function(block) {
     const lines = block.split('\n').map(function(l){ return l.trim(); }).filter(function(l){ return l.length > 0; });
     if (lines.length === 0) return null;
 
-    // Primera línea = título
     let title = lines[0].replace(/^#+\s*/, '').trim();
-    if (title.length > 80) title = title.slice(0, 77) + '...';
+    if (title.length > 90) title = title.slice(0, 87) + '...';
 
-    // Segunda línea corta sin bullet = subtítulo
     let subtitle = '';
     let contentStart = 1;
-    if (lines.length > 1 && lines[1].length < 70 && !lines[1].startsWith('•') && !lines[1].startsWith('-') && !lines[1].startsWith('*')) {
+    if (lines.length > 1 && lines[1].length < 70 && !lines[1].startsWith('•') && !lines[1].startsWith('-')) {
       subtitle = lines[1];
       contentStart = 2;
     }
 
-    // Resto = bullets (máx 6)
     const bulletLines = lines.slice(contentStart, contentStart + 6).map(function(l) {
       return '• ' + l.replace(/^[-•*]\s*/, '').trim();
     });
 
     return { title: title, subtitle: subtitle, content: bulletLines.join('\n') };
   }).filter(function(s){ return s !== null; });
+}
+
+// Función principal
+function parseTextToSlides(text) {
+  if (!text.trim()) return [];
+  if (isBibleText(text)) {
+    return parseBibleText(text);
+  }
+  return parsePlainText(text);
 }
 
 // ─── Canvas helpers ───────────────────────────────────────────────────────────
